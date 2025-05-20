@@ -1,9 +1,9 @@
 services:
-  nginx_server:
+  aton:
     build:
       context: . 
       dockerfile: Dockerfile
-    container_name: valerii_nginx
+    image: ghcr.io/derad6709/aton:main
     ports:
       - "80:80"
       - "443:443"
