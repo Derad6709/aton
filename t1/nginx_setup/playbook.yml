@@ -1,0 +1,51 @@
+---
+- name: Configure Nginx Web Server
+  hosts: webservers
+  become: true
+
+  vars_files:
+    - vars/main.yml
+
+  tasks:
+    - name: Install Nginx
+      apt:
+        name: nginx
+        state: present
+        update_cache: yes
+
+    - name: Deploy nginx location from template
+      template:
+        src: templates/location.conf.j2
+        dest: /etc/nginx/location.conf
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Deploy nginx configuration from template
+      template:
+        src: templates/nginx.conf.j2
+        dest: /etc/nginx/nginx.conf
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Restart Nginx
+
+    - name: Ensure nginx is running and enabled
+      service:
+        name: nginx
+        state: started
+        enabled: yes
+
+    - name: Wait for ports to become open
+      wait_for:
+        port: "{{ item }}"
+        delay: 2
+        timeout: 30
+        state: started
+      loop: "{{ nginx_ports }}"
+
+  handlers:
+    - name: Restart Nginx
+      service:
+        name: nginx
+        state: restarted

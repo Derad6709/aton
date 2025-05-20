@@ -1,0 +1,17 @@
+user www-data;
+worker_processes auto;
+
+events {
+    worker_connections 777;
+}
+
+http {
+    server {
+        {% for port in nginx_ports %}
+        listen {{ port }};
+        {% endfor %}
+        server_name {{ server_name }};
+
+        include /etc/nginx/location.conf;
+    }
+}
