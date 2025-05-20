@@ -1,0 +1,105 @@
+name: Build and Deploy Aton Nginx
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-push:
+    name: Build Code and Push to Packages
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5.7.0
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+
+      - name: Build and push Docker image
+        id: push
+        uses: docker/build-push-action@v6.17.0
+        with:
+          context: ./t2
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Generate artifact attestation
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME}}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+  deploy:
+    needs: build-and-push
+    name: Deploy Code
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Copy files to server
+        uses: appleboy/scp-action@v1.0.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          source: "./t2/docker-compose.yml, ./t2/html/"
+          target: "./"
+          strip_components: 2
+
+      - name: SSH and Docker Compose operations
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script: |
+            echo "--- Current directory: $(pwd) ---"
+            echo "--- Listing files: ---"
+            ls -la
+
+            # Ensure docker-compose.yml is present
+            if [ ! -f docker-compose.yml ]; then
+              echo "ERROR: docker-compose.yml not found in ${{ secrets.TARGET_DIR }}"
+              exit 1
+            fi
+
+            echo "--- Pulling latest images for services defined in docker-compose.yml ---"
+            docker-compose pull
+
+            echo "--- Stopping and removing old containers (if any) ---"
+            docker-compose down --remove-orphans
+
+            echo "--- Starting new containers in detached mode ---"
+            docker-compose up -d --remove-orphans
+
+            echo "--- Listing running Docker containers ---"
+            docker ps
+
+            echo "--- Deployment script finished ---"
